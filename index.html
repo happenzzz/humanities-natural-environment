@@ -12,7 +12,13 @@
     --ink:#182233; --muted:#7a8599; --line:#e6e9f2;
     --card:#ffffff; --shadow:0 8px 22px rgba(0,0,0,.08);
     --radius:18px; --gap:14px;
-    --minCell:190px;                 /* ★ 카드 크기: 기본/분류 공통 고정 */
+
+    /* 기본 그리드 카드 크기 */
+    --minCell:190px;
+
+    /* 분류모드(좌/우 존) 카드 고정 크기 */
+    --classCell:190px; /* 필요하면 170px/180px 등으로 바꾸세요 */
+
     --dotSize:4px; --dotStep:36px;
 
     /* 중앙 버튼(글자 2배) */
@@ -29,6 +35,8 @@
     background:
       radial-gradient(circle at 13px 13px, #dfe6fb var(--dotSize), transparent calc(var(--dotSize) + .5px)) 0 0/var(--dotStep) var(--dotStep),
       #fff;
+    /* 전체화면/모바일에서 오버스크롤 제스처 억제 */
+    overscroll-behavior: none;
   }
 
   .topbar{
@@ -96,10 +104,11 @@
     background: radial-gradient(circle at 16px 16px, rgba(59,130,246,.28) 6px, transparent 6px) 0 0/44px 44px, transparent;
   }
 
-  /* 분류모드도 기본 그리드와 동일한 크기/형식 */
+  /* ▷ 분류모드: 카드 크기 '고정' */
   .zone-grid{
     display:grid; gap:var(--gap);
-    grid-template-columns:repeat(auto-fit, minmax(var(--minCell), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(var(--classCell), var(--classCell)));
+    justify-content:center;   /* 남는 공간 가운데 정렬 */
     padding-top:6px;
   }
 
@@ -137,7 +146,7 @@
     border-radius:999px; border:3px solid #e7ecfb; background:#fff;
     box-shadow:0 8px 18px rgba(0,0,0,.12);
     user-select:none; -webkit-user-select:none;
-    pointer-events:none;          /* ★ 드래그/스크롤 방해 금지 */
+    pointer-events:none;          /* 드래그/스크롤 방해 금지 */
   }
   .zone-midbtn .emoji{ font-size:1.1em }
   .zone-midbtn.left  { left:25%; }
@@ -317,7 +326,6 @@
 
       const onUp = (ev) => {
         if (st && st.dragging){
-          // drop
           const zone = pickDropHalf(ev.clientX, ev.clientY);
           if (zone){
             const it = items.find(v => v.key === card.dataset.key);
@@ -326,7 +334,6 @@
           }
           cleanupDrag();
         }else{
-          // tap/click → open
           openViewer(item.src, title);
         }
         window.removeEventListener('pointermove', onMove);
@@ -403,23 +410,34 @@
   viewerClose.addEventListener('click', closeViewer);
   window.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeViewer(); });
 
-  /* 전체화면 토글 */
+  /* 전체화면 토글 (+ 제스처 해제 완화) */
+  let fsActive = false;
   fsBtn.addEventListener('click', async () => {
     try{
       if (!document.fullscreenElement){
         await document.documentElement.requestFullscreen?.();
-        fsBtn.textContent = '⤡ 전체화면 해제';
       }else{
         await document.exitFullscreen?.();
-        fsBtn.textContent = '⤢ 전체화면';
       }
-    }catch{
-      // 브라우저가 막으면 무시
-    }
+    }catch{ /* ignore */ }
   });
   document.addEventListener('fullscreenchange', () => {
-    fsBtn.textContent = document.fullscreenElement ? '⤡ 전체화면 해제' : '⤢ 전체화면';
+    fsActive = !!document.fullscreenElement;
+    fsBtn.textContent = fsActive ? '⤡ 전체화면 해제' : '⤢ 전체화면';
+    document.body.classList.toggle('fs-active', fsActive);
   });
+
+  // 전체화면 중 오버스크롤로 인한 의도치 않은 해제 완화
+  // - 분류존/뷰어/메인그리드 내부 스크롤은 허용
+  function isAllowedScrollTarget(t){
+    return t.closest('.zone-half') || t.closest('.viewer-card') || t.closest('.wrap');
+  }
+  document.addEventListener('touchmove', (e) => {
+    if (!fsActive) return;
+    if (!isAllowedScrollTarget(e.target)) {
+      e.preventDefault(); // 비콘텐츠 영역의 스와이프는 무시
+    }
+  }, {passive:false});
 
   /* 데이터 로딩 */
   async function loadAll(){
