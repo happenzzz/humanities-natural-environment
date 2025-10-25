@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>잼보드형 캔버스 — 포스트잇 카드 + 분류하기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#182233; --muted:#7a8599; --line:#e6e9f2;
+    --card:#ffffff; --shadow:0 8px 22px rgba(0,0,0,.08);
+    --radius:18px; --gap:14px;
+    --minCell:190px;                 /* ★ 카드 크기: 기본/분류 공통 고정 */
+    --dotSize:4px; --dotStep:36px;
+
+    /* 중앙 버튼(글자 2배) */
+    --zoneBtnFont: clamp(28px, 3.6vw, 36px);
+    --zoneBtnPadY: 14px;
+    --zoneBtnPadX: 22px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; color:var(--ink);
+    font-family:"Noto Sans KR", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(circle at 13px 13px, #dfe6fb var(--dotSize), transparent calc(var(--dotSize) + .5px)) 0 0/var(--dotStep) var(--dotStep),
+      #fff;
+  }
+
+  .topbar{
+    position:sticky; top:0; z-index:40; height:60px;
+    display:flex; align-items:center; justify-content:flex-end; gap:10px;
+    padding:10px 16px; background:linear-gradient(#fff, rgba(255,255,255,.92));
+    border-bottom:1px solid var(--line); backdrop-filter:saturate(1.1) blur(4px);
+  }
+  .btn{
+    appearance:none; border:2px solid var(--line); background:#fff; color:#0f172a;
+    padding:12px 16px; border-radius:14px; font-weight:800; cursor:pointer;
+    box-shadow:0 1px 0 rgba(0,0,0,.02); letter-spacing:.2px; font-size:15px;
+    transition:transform .05s, border-color .1s;
+  }
+  .btn:active{ transform:translateY(1px) }
+  .btn:hover{border-color:#d3d9eb}
+
+  .wrap{max-width:1200px; margin:0 auto; padding:18px}
+  .grid{
+    display:grid; gap:var(--gap);
+    grid-template-columns:repeat(auto-fit, minmax(var(--minCell), 1fr));
+    align-content:start;
+  }
+
+  /* 카드(편집 불가) */
+  .card{
+    display:flex; flex-direction:column; background:var(--card);
+    border:1.5px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden;
+    user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+    touch-action:none;
+  }
+  .shot{ width:100%; aspect-ratio:1/1; position:relative; overflow:hidden; background:#f6f7fb; }
+  .shot img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; -webkit-user-drag:none; }
+  .cap{
+    padding:12px 12px; border-top:1px solid var(--line);
+    font-size:15px; line-height:1.35; min-height:44px;
+    -webkit-user-select:none; user-select:none;
+  }
+
+  /* 자동 로딩 안내 */
+  .overlay{
+    position:fixed; inset:60px 0 0 0; display:flex; align-items:center; justify-content:center;
+    pointer-events:auto; z-index:25;
+    background:repeating-linear-gradient(45deg, rgba(255,255,255,.92) 0 14px, rgba(255,255,255,.97) 14px 28px);
+    border-top:1px dashed #d7dce9;
+  }
+  .ov-card{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px 20px; box-shadow:var(--shadow); text-align:center; max-width:560px; }
+  .ov-title{font-weight:800; font-size:18px; margin-bottom:8px}
+  .ov-desc{color:#64748b; line-height:1.6}
+  .ov-actions{margin-top:14px; display:flex; gap:10px; justify-content:center}
+  .hide{display:none !important;}
+
+  /* 분류 모드 (배경 가려 중복 방지) */
+  .classify{ position:fixed; inset:60px 0 0 0; z-index:30; display:none; background:#fff; }
+  .classify.active{ display:block; }
+  .zone-half{
+    position:absolute; top:0; width:50%; height:100%;
+    overflow:auto; padding:18px;
+  }
+  .zone-left{ left:0;
+    background: radial-gradient(circle at 16px 16px, rgba(244,63,94,.28) 6px, transparent 6px) 0 0/44px 44px, transparent;
+  }
+  .zone-right{ right:0;
+    background: radial-gradient(circle at 16px 16px, rgba(59,130,246,.28) 6px, transparent 6px) 0 0/44px 44px, transparent;
+  }
+
+  /* 분류모드도 기본 그리드와 동일한 크기/형식 */
+  .zone-grid{
+    display:grid; gap:var(--gap);
+    grid-template-columns:repeat(auto-fit, minmax(var(--minCell), 1fr));
+    padding-top:6px;
+  }
+
+  .divider{
+    position:absolute; top:0; bottom:0; left:50%; width:24px; transform:translateX(-50%);
+    border-radius:24px;
+    background:
+      radial-gradient(circle, #f97316 5px, transparent 6px) center 14px/1px 40px repeat-y,
+      linear-gradient(180deg, #c7d2fe 0%, #f5d0fe 100%);
+    box-shadow:inset 0 0 0 2px rgba(0,0,0,.06);
+    opacity:.98; z-index:34; pointer-events:none;
+  }
+
+  .zone-left.highlight, .zone-right.highlight{
+    outline:5px dashed rgba(0,0,0,.15); outline-offset:-8px;
+    animation:pulse 1s infinite;
+  }
+  .zone-left.highlight{ box-shadow:inset 0 0 0 4px rgba(244,63,94,.35); }
+  .zone-right.highlight{ box-shadow:inset 0 0 0 4px rgba(59,130,246,.35); }
+  @keyframes pulse{ 0%{opacity:.9} 50%{opacity:1} 100%{opacity:.9} }
+
+  .drag-ghost{
+    position:fixed; z-index:50; width:180px; pointer-events:none; opacity:.95;
+    transform:translate(-50%, -50%); filter:drop-shadow(0 10px 18px rgba(0,0,0,.18));
+    will-change:transform;
+  }
+  .dragging .card{ opacity:.85 }
+
+  /* 중앙 고정 버튼(아이콘 + 큰 글씨, 드래그 간섭 없음) */
+  .zone-midbtn{
+    position:fixed; top:50%; transform:translate(-50%, -50%);
+    z-index:36; display:flex; align-items:center; gap:10px;
+    padding:var(--zoneBtnPadY) var(--zoneBtnPadX);
+    font-size:var(--zoneBtnFont); font-weight:900;
+    border-radius:999px; border:3px solid #e7ecfb; background:#fff;
+    box-shadow:0 8px 18px rgba(0,0,0,.12);
+    user-select:none; -webkit-user-select:none;
+    pointer-events:none;          /* ★ 드래그/스크롤 방해 금지 */
+  }
+  .zone-midbtn .emoji{ font-size:1.1em }
+  .zone-midbtn.left  { left:25%; }
+  .zone-midbtn.right { left:75%; }
+
+  /* 클릭 확대 뷰어 */
+  .viewer{ position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:60; }
+  .viewer.show{ display:flex; }
+  .viewer-card{ max-width:min(92vw, 1100px); max-height:86vh; background:#fff; border-radius:20px; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,.25); display:flex; flex-direction:column; }
+  .vshot{ background:#000; display:flex; align-items:center; justify-content:center; }
+  .vshot img{ max-width:92vw; max-height:64vh; width:auto; height:auto; object-fit:contain; }
+  .vcap{
+    padding:20px 22px; border-top:1px solid #e6e9f2;
+    font-size:clamp(42px, 6.6vw, 66px);
+    line-height:1.2; text-align:center;
+    font-family:"HCR Batang","함초롬바탕체","Batang","Times New Roman",serif;
+  }
+  .viewer .x{ position:absolute; top:14px; right:16px; background:#000; color:#fff; border:none; border-radius:12px; padding:10px 12px; font-size:14px; cursor:pointer; opacity:.9; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <button id="classifyBtn" class="btn">🧭 분류하기</button>
+    <button id="shuffle" class="btn">🔀 섞기</button>
+    <button id="fsBtn" class="btn">⤢ 전체화면</button>
+  </div>
+
+  <!-- 기본 카드 그리드 -->
+  <div class="wrap">
+    <div id="grid" class="grid" aria-live="polite"></div>
+  </div>
+
+  <!-- 분류 모드 -->
+  <div id="classify" class="classify" aria-hidden="true">
+    <div class="zone-half zone-left" id="zoneLeft">
+      <div class="zone-title">자연환경</div>
+      <div id="zoneNatural" class="zone-grid"></div>
+    </div>
+    <div class="divider" aria-hidden="true"></div>
+    <div class="zone-half zone-right" id="zoneRight">
+      <div class="zone-title">인문환경</div>
+      <div id="zoneHuman" class="zone-grid"></div>
+    </div>
+    <!-- 중앙 고정 버튼 -->
+    <div class="zone-midbtn left"  aria-hidden="true"><span class="emoji">🌿</span> 자연환경</div>
+    <div class="zone-midbtn right" aria-hidden="true"><span class="emoji">🏙️</span> 인문환경</div>
+  </div>
+
+  <!-- 자동 로딩 안내 -->
+  <div id="overlay" class="overlay hide">
+    <div class="ov-card">
+      <div class="ov-title">이미지 목록을 자동으로 가져오지 못했어요</div>
+      <div class="ov-desc">서버에서 <code>assets/</code> 목록을 제공하지 않거나 <code>list.json</code>이 없습니다.<br/>아래에서 폴더/파일을 선택하면 즉시 카드가 만들어집니다.</div>
+      <div class="ov-actions">
+        <button id="pickDir" class="btn">📁 폴더 선택</button>
+        <button id="pickFiles" class="btn">🖼️ 파일 선택</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 클릭 확대 뷰어 -->
+  <div id="viewer" class="viewer" aria-hidden="true">
+    <div class="viewer-card">
+      <button class="x" id="viewerClose">닫기 ✕</button>
+      <div class="vshot"><img id="viewerImg" alt=""></div>
+      <div class="vcap" id="viewerCap"></div>
+    </div>
+  </div>
+
+  <!-- 숨김 입력 -->
+  <input id="fileInput" type="file" webkitdirectory multiple accept="image/*" style="display:none" />
+  <input id="multiInput" type="file" multiple accept="image/*" style="display:none" />
+
+<script>
+(() => {
+  const grid = document.getElementById('grid');
+  const shuffleBtn = document.getElementById('shuffle');
+  const classifyBtn = document.getElementById('classifyBtn');
+  const classifyLayer = document.getElementById('classify');
+  const zoneNatural = document.getElementById('zoneNatural');
+  const zoneHuman = document.getElementById('zoneHuman');
+  const zoneLeft = document.getElementById('zoneLeft');
+  const zoneRight = document.getElementById('zoneRight');
+  const overlay = document.getElementById('overlay');
+  const pickDirBtn = document.getElementById('pickDir');
+  const pickFilesBtn = document.getElementById('pickFiles');
+  const folderInput = document.getElementById('fileInput');
+  const filesInput = document.getElementById('multiInput');
+  const fsBtn = document.getElementById('fsBtn');
+
+  const viewer = document.getElementById('viewer');
+  const viewerImg = document.getElementById('viewerImg');
+  const viewerCap = document.getElementById('viewerCap');
+  const viewerClose = document.getElementById('viewerClose');
+
+  const LIST_JSON_URL = 'assets/list.json';
+  const MANIFEST_URL  = 'assets/manifest.json';
+  const AUTOINDEX_URL = 'assets/';
+  const CLASSIFY_KEY_PREFIX = 'jam-note-classify::';
+  const baseName = (p) => (p||'').split('/').pop().replace(/\.[^.]+$/, '');
+
+  let items = []; // { key, src, zone }
+  let classifyMode = false;
+
+  function createCardEl(item){
+    const title = baseName(item.key);
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.dataset.key = item.key;
+    card.innerHTML = `
+      <div class="shot"><img src="${item.src}" alt="${title}" draggable="false"></div>
+      <div class="cap" aria-label="${title}">${title}</div>
+    `;
+    addPointerInteraction(card, item, title);
+    return card;
+  }
+
+  function renderGrid(){
+    grid.innerHTML = '';
+    items.forEach(it => grid.appendChild(createCardEl(it)));
+  }
+  function renderClassify(){
+    zoneNatural.innerHTML = '';
+    zoneHuman.innerHTML = '';
+    items.forEach(it => {
+      const el = createCardEl(it);
+      (it.zone === 'human' ? zoneHuman : zoneNatural).appendChild(el);
+    });
+  }
+
+  shuffleBtn.addEventListener('click', () => {
+    items.sort(() => Math.random() - 0.5);
+    classifyMode ? renderClassify() : renderGrid();
+  });
+
+  function setClassifyMode(on){
+    classifyMode = on;
+    if (on){
+      classifyLayer.classList.add('active');
+      classifyLayer.setAttribute('aria-hidden','false');
+      classifyBtn.textContent = '✅ 분류 끝내기';
+      renderClassify();
+    }else{
+      classifyLayer.classList.remove('active');
+      classifyLayer.setAttribute('aria-hidden','true');
+      classifyBtn.textContent = '🧭 분류하기';
+      renderGrid();
+    }
+  }
+  classifyBtn.addEventListener('click', () => setClassifyMode(!classifyMode));
+
+  /* 클릭/탭=확대, 길게누르기/끌기=드래그 */
+  function addPointerInteraction(card, item, title){
+    let st = null; // {id,startX,startY,time,dragging,ghost}
+
+    const MOVE = 6;        // px
+    const HOLD = 180;      // ms
+
+    card.addEventListener('pointerdown', (e) => {
+      card.setPointerCapture?.(e.pointerId);
+      st = { id:e.pointerId, startX:e.clientX, startY:e.clientY, time:Date.now(), dragging:false, ghost:null };
+
+      const onMove = (ev) => {
+        if (!st) return;
+        const moved = Math.hypot(ev.clientX - st.startX, ev.clientY - st.startY) > MOVE;
+        const held  = (Date.now() - st.time) >= HOLD;
+
+        if (classifyMode && !st.dragging && (moved || held)){
+          startDrag(ev);
+        }else if (st.dragging){
+          moveGhost(ev.clientX, ev.clientY);
+          highlightDrop(ev.clientX, ev.clientY);
+          autoScroll(ev.clientX, ev.clientY);
+        }
+        ev.preventDefault();
+      };
+
+      const onUp = (ev) => {
+        if (st && st.dragging){
+          // drop
+          const zone = pickDropHalf(ev.clientX, ev.clientY);
+          if (zone){
+            const it = items.find(v => v.key === card.dataset.key);
+            if (it){ it.zone = zone; saveZone(it.key, zone); }
+            (zone === 'human' ? zoneHuman : zoneNatural).appendChild(card);
+          }
+          cleanupDrag();
+        }else{
+          // tap/click → open
+          openViewer(item.src, title);
+        }
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        st = null;
+        ev.preventDefault();
+      };
+
+      const onCancel = () => {
+        if (st && st.dragging) cleanupDrag();
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onCancel);
+        st = null;
+      };
+
+      window.addEventListener('pointermove', onMove, {passive:false});
+      window.addEventListener('pointerup', onUp, {passive:false});
+      window.addEventListener('pointercancel', onCancel, {passive:false});
+    });
+
+    function startDrag(ev){
+      st.dragging = true;
+      const ghost = card.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      ghost.style.width = Math.min(200, card.getBoundingClientRect().width) + 'px';
+      document.body.appendChild(ghost);
+      st.ghost = ghost;
+      moveGhost(ev.clientX, ev.clientY);
+      document.body.classList.add('dragging');
+    }
+    function moveGhost(x,y){ if (st?.ghost){ st.ghost.style.left=x+'px'; st.ghost.style.top=y+'px'; } }
+    function cleanupDrag(){
+      zoneLeft.classList.remove('highlight');
+      zoneRight.classList.remove('highlight');
+      if (st?.ghost) st.ghost.remove();
+      document.body.classList.remove('dragging');
+    }
+  }
+
+  // 화면 절반 판정(데스크탑도 쉬움)
+  function pickDropHalf(x,y){
+    const r = classifyLayer.getBoundingClientRect();
+    if (y < r.top || y > r.bottom) return null;
+    const mid = (r.left + r.right)/2;
+    return x < mid ? 'natural' : 'human';
+  }
+  function highlightDrop(x,y){
+    const z = pickDropHalf(x,y);
+    zoneLeft.classList.toggle('highlight',  z==='natural');
+    zoneRight.classList.toggle('highlight', z==='human');
+  }
+  function autoScroll(x,y){
+    [zoneLeft,zoneRight].forEach(z=>{
+      const r=z.getBoundingClientRect();
+      if (x<r.left||x>r.right||y<r.top||y>r.bottom) return;
+      const edge=60, speed=18;
+      if (y-r.top<edge) z.scrollTop-=speed; else if (r.bottom-y<edge) z.scrollTop+=speed;
+    });
+  }
+
+  /* 뷰어 */
+  function openViewer(src, title){
+    viewerImg.src = src; viewerImg.alt = title; viewerCap.textContent = title;
+    viewer.classList.add('show'); viewer.setAttribute('aria-hidden','false');
+    document.body.style.overflow='hidden';
+  }
+  function closeViewer(){
+    viewer.classList.remove('show'); viewer.setAttribute('aria-hidden','true');
+    viewerImg.src=''; document.body.style.overflow='';
+  }
+  viewer.addEventListener('click', (e)=>{ if (e.target===viewer) closeViewer(); });
+  viewerClose.addEventListener('click', closeViewer);
+  window.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeViewer(); });
+
+  /* 전체화면 토글 */
+  fsBtn.addEventListener('click', async () => {
+    try{
+      if (!document.fullscreenElement){
+        await document.documentElement.requestFullscreen?.();
+        fsBtn.textContent = '⤡ 전체화면 해제';
+      }else{
+        await document.exitFullscreen?.();
+        fsBtn.textContent = '⤢ 전체화면';
+      }
+    }catch{
+      // 브라우저가 막으면 무시
+    }
+  });
+  document.addEventListener('fullscreenchange', () => {
+    fsBtn.textContent = document.fullscreenElement ? '⤡ 전체화면 해제' : '⤢ 전체화면';
+  });
+
+  /* 데이터 로딩 */
+  async function loadAll(){
+    if (await tryListJson()) return;
+    if (await tryManifest()) return;
+    if (await tryAutoindex()) return;
+    showOverlay();
+  }
+  async function tryListJson(){
+    try{
+      const res = await fetch(LIST_JSON_URL, {cache:'no-store'});
+      if(!res.ok) throw 0;
+      const data = await res.json();
+      const files = Array.isArray(data) ? data : (data.images || []);
+      if(!files.length) throw 0;
+      items = files.filter(p=>/\.(jpe?g|png|webp|gif)$/i.test(String(p)))
+                   .map(p=>{ const key=String(p).replace(/^\.?\/*assets\//,''); return {key,src:'assets/'+key,zone:loadZone(key)}; });
+      renderGrid();
+      return true;
+    }catch{ return false; }
+  }
+  async function tryManifest(){
+    try{
+      const res = await fetch(MANIFEST_URL, {cache:'no-store'});
+      if(!res.ok) throw 0;
+      const data = await res.json();
+      const files = Array.isArray(data) ? data : (data.images || []);
+      if(!files.length) throw 0;
+      items = files.filter(p=>/\.(jpe?g|png|webp|gif)$/i.test(String(p)))
+                   .map(p=>{ const key=String(p).replace(/^\.?\/*assets\//,''); return {key,src:'assets/'+key,zone:loadZone(key)}; });
+      renderGrid();
+      return true;
+    }catch{ return false; }
+  }
+  async function tryAutoindex(){
+    try{
+      const res = await fetch(AUTOINDEX_URL, {cache:'no-store'});
+      if(!res.ok) throw 0;
+      const html = await res.text();
+      const hrefs = [...html.matchAll(/href="([^"]+\.(?:jpe?g|png|webp|gif))"/gi)].map(m=>m[1]);
+      const unique = Array.from(new Set(hrefs)).filter(h=>!h.endsWith('/'));
+      if(!unique.length) throw 0;
+      items = unique.map(p=>{ const name=decodeURIComponent(p.split('/').pop()); return {key:name,src:'assets/'+name,zone:loadZone(name)}; });
+      renderGrid();
+      return true;
+    }catch{ return false; }
+  }
+  function saveZone(key,zone){ try{ localStorage.setItem(CLASSIFY_KEY_PREFIX+key, zone); }catch{} }
+  function loadZone(key){ try{ return localStorage.getItem(CLASSIFY_KEY_PREFIX+key) || 'pool'; }catch{ return 'pool'; } }
+
+  /* 파일 선택(옵션) */
+  function showOverlay(){ overlay.classList.remove('hide'); }
+  function hideOverlay(){ overlay.classList.add('hide'); }
+  pickDirBtn?.addEventListener('click', async () => {
+    if (window.showDirectoryPicker){
+      try{
+        const dir = await window.showDirectoryPicker({id:'assets-picker', mode:'read'});
+        const out=[]; for await (const entry of dir.values()){ await collectFiles(entry,out); }
+        if(!out.length) return; items=out; hideOverlay(); renderGrid();
+      }catch{}
+      return;
+    }
+    folderInput.click();
+  });
+  pickFilesBtn?.addEventListener('click', () => filesInput.click());
+  async function collectFiles(handle,out){
+    if (handle.kind==='file'){
+      const f = await handle.getFile(); if(!/^image\//.test(f.type)) return;
+      out.push({ key:f.name, src:URL.createObjectURL(f), zone:loadZone(f.name) });
+    }else if(handle.kind==='directory'){
+      for await (const entry of handle.values()){ await collectFiles(entry,out); }
+    }
+  }
+  folderInput.addEventListener('change', (e)=>{
+    const files=[...e.target.files].filter(f=>/^image\//.test(f.type));
+    if(!files.length) return;
+    items = files.map(f=>({key:f.name,src:URL.createObjectURL(f),zone:loadZone(f.name)}));
+    hideOverlay(); renderGrid();
+  });
+  filesInput.addEventListener('change', (e)=>{
+    const files=[...e.target.files].filter(f=>/^image\//.test(f.type));
+    if(!files.length) return;
+    items = files.map(f=>({key:f.name,src:URL.createObjectURL(f),zone:loadZone(f.name)}));
+    hideOverlay(); renderGrid();
+  });
+
+  // 시작
+  loadAll();
+})();
+</script>
+</body>
+</html>
